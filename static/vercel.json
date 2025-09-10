@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/api/analyze", "destination": "https://fieldhockey.onrender.com/api/analyze" }
+    { "source": "/api/:path*", "destination": "https://fieldhockey.onrender.com/api/:path*" }
   ]
 }
