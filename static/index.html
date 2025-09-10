@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hockey Analyzer MVP</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 20px; }
+    .card { max-width: 980px; margin: 0 auto; border: 1px solid #ddd; border-radius: 10px; padding: 20px; }
+    .row { display: flex; gap: 16px; flex-wrap: wrap; }
+    .col { flex: 1 1 300px; }
+    label { display: block; margin: 8px 0 4px; font-weight: 600; }
+    input[type="text"], input[type="number"], select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
+    input[type="file"] { padding: 6px 0; }
+    input[type="range"] { width: 100%; }
+    .colors { display: grid; grid-template-columns: 1fr 160px; gap: 8px; align-items: center; }
+    button { background: #0d6efd; color: white; border: none; padding: 10px 16px; border-radius: 8px; cursor: pointer; }
+    button.secondary { background: #6c757d; }
+    button.danger { background: #dc3545; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    .result { white-space: pre-wrap; background: #f7f7f7; padding: 12px; border-radius: 8px; border: 1px solid #eee; }
+    .hr { height: 1px; background: #eee; margin: 16px 0; }
+    small.hint { color: #666; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+</head>
+<body>
+  <div class="card">
+    <h2>Hockey Analyzer MVP</h2>
+    <p>Cargá un video (YouTube o archivo) y mapeá los colores de camisetas a cada equipo.</p>
+
+    <div class="row">
+      <div class="col">
+        <label>Método de entrada</label>
+        <label><input type="radio" name="mode" value="youtube" checked /> Enlace de YouTube</label>
+        <label><input type="radio" name="mode" value="file" /> Archivo local</label>
+      </div>
+    </div>
+
+    <div class="row" id="youtubeRow">
+      <div class="col">
+        <label>URL de YouTube</label>
+        <input id="youtubeUrl" type="text" placeholder="https://www.youtube.com/watch?v=..." />
+      </div>
+    </div>
+
+    <div class="row" id="fileRow" style="display: none;">
+      <div class="col">
+        <label>Archivo de video</label>
+        <input id="videoFile" type="file" accept="video/*" />
+      </div>
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="row">
+      <div class="col">
+        <label>Equipo A - nombre</label>
+        <input id="teamAName" type="text" placeholder="Equipo A" value="Equipo A" />
+      </div>
+      <div class="col colors">
+        <label>Equipo A - color</label>
+        <input id="teamAColor" type="color" value="#ff0000" />
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col">
+        <label>Equipo B - nombre</label>
+        <input id="teamBName" type="text" placeholder="Equipo B" value="Equipo B" />
+      </div>
+      <div class="col colors">
+        <label>Equipo B - color</label>
+        <input id="teamBColor" type="color" value="#0000ff" />
+      </div>
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="row">
+      <div class="col">
+        <label><input id="autoCalibrate" type="checkbox" checked /> Autocalibrar (orientación, mitad y círculo)</label>
+        <small class="hint">Si está activo, se ignoran los controles manuales.</small>
+      </div>
+    </div>
+
+    <div class="row" id="manualCalibRow1">
+      <div class="col">
+        <label>Orientación de la cancha</label>
+        <select id="fieldOrientation">
+          <option value="vertical" selected>Vertical (mitad superior/inferior)</option>
+          <option value="horizontal">Horizontal (mitad izquierda/derecha)</option>
+        </select>
+      </div>
+      <div class="col">
+        <label>Offset de la línea de mitad</label>
+        <input id="halfOffset" type="range" min="-0.49" max="0.49" step="0.01" value="0" />
+        <small class="hint">Desplaza la línea media si el encuadre no está centrado. Valor: <span id="halfOffsetVal">0</span></small>
+      </div>
+    </div>
+
+    <div class="row" id="manualCalibRow2">
+      <div class="col">
+        <label>Lado del círculo (ataque)</label>
+        <select id="circleSide">
+          <option value="">(Opcional)</option>
+          <option value="top">Arriba (vertical)</option>
+          <option value="bottom">Abajo (vertical)</option>
+          <option value="left">Izquierda (horizontal)</option>
+          <option value="right">Derecha (horizontal)</option>
+        </select>
+        <small class="hint">Seleccioná el lado del círculo visible en el video.</small>
+      </div>
+      <div class="col">
+        <label>Ancho de banda del círculo (porcentaje)</label>
+        <input id="circleBandPct" type="range" min="0.05" max="0.5" step="0.01" value="0.18" />
+        <small class="hint">Ajustá para cubrir el área del círculo. Valor: <span id="circleBandPctVal">0.18</span></small>
+      </div>
+      <div class="col">
+        <label>Umbral de presencia en círculo</label>
+        <input id="circleThreshold" type="number" step="0.0005" min="0" value="0.002" />
+        <small class="hint">Cuánto color se requiere para contar presencia/entrada.</small>
+      </div>
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="row">
+      <div class="col">
+        <label>Zoom OCR</label>
+        <input id="ocrZoom" type="range" min="1.0" max="3.0" step="0.1" value="1.6" />
+        <small class="hint">Escalado del recorte antes de OCR. Valor: <span id="ocrZoomVal">1.6</span>x</small>
+      </div>
+      <div class="col">
+        <label>Sensibilidad OCR</label>
+        <input id="ocrSensitivity" type="range" min="0" max="1" step="0.05" value="0.5" />
+        <small class="hint">0 = estricto, 1 = permisivo (más falsos positivos). Valor: <span id="ocrSensitivityVal">0.5</span></small>
+      </div>
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="row">
+      <div class="col">
+        <label>Seleccionar equipo para dorsal</label>
+        <select id="selectedTeam">
+          <option value="">(Opcional)</option>
+          <option>Equipo A</option>
+          <option>Equipo B</option>
+        </select>
+      </div>
+      <div class="col">
+        <label>Número de jugadora (dorsal)</label>
+        <input id="selectedNumber" type="number" min="0" step="1" placeholder="Opcional" />
+      </div>
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="row">
+      <div class="col">
+        <button id="analyzeBtn">Analizar</button>
+      </div>
+      <div class="col">
+        <label>Exportar</label>
+        <div class="row">
+          <div class="col"><button id="exportJsonBtn" class="secondary" disabled>Exportar JSON</button></div>
+          <div class="col"><button id="exportCsvBtn" class="secondary" disabled>Exportar CSV</button></div>
+          <div class="col"><button id="exportZipBtn" class="secondary" disabled>Exportar Bundle (.zip)</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="row">
+      <div class="col">
+        <label>Presets</label>
+        <div class="row">
+          <div class="col"><input id="presetName" type="text" placeholder="Nombre del preset" /></div>
+          <div class="col"><button id="savePresetBtn" class="secondary">Guardar preset</button></div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <select id="presetSelect"></select>
+          </div>
+          <div class="col"><button id="loadPresetBtn" class="secondary">Cargar preset</button></div>
+          <div class="col"><button id="deletePresetBtn" class="danger">Borrar preset</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hr"></div>
+
+    <h3>Resultado</h3>
+    <div id="result" class="result">Esperando análisis...</div>
+  </div>
+
+  <script>
+    const modeRadios = document.querySelectorAll('input[name="mode"]');
+    const youtubeRow = document.getElementById('youtubeRow');
+    const fileRow = document.getElementById('fileRow');
+    const resultEl = document.getElementById('result');
+
+    const autoCalibrate = document.getElementById('autoCalibrate');
+    const manualCalibRow1 = document.getElementById('manualCalibRow1');
+    const manualCalibRow2 = document.getElementById('manualCalibRow2');
+
+    const fieldOrientation = document.getElementById('fieldOrientation');
+    const halfOffset = document.getElementById('halfOffset');
+    const halfOffsetVal = document.getElementById('halfOffsetVal');
+    const circleSide = document.getElementById('circleSide');
+    const circleBandPct = document.getElementById('circleBandPct');
+    const circleBandPctVal = document.getElementById('circleBandPctVal');
+    const circleThreshold = document.getElementById('circleThreshold');
+
+    const ocrZoom = document.getElementById('ocrZoom');
+    const ocrZoomVal = document.getElementById('ocrZoomVal');
+    const ocrSensitivity = document.getElementById('ocrSensitivity');
+    const ocrSensitivityVal = document.getElementById('ocrSensitivityVal');
+
+    const exportJsonBtn = document.getElementById('exportJsonBtn');
+    const exportCsvBtn = document.getElementById('exportCsvBtn');
+    const exportZipBtn = document.getElementById('exportZipBtn');
+
+    const presetNameInput = document.getElementById('presetName');
+    const presetSelect = document.getElementById('presetSelect');
+    const savePresetBtn = document.getElementById('savePresetBtn');
+    const loadPresetBtn = document.getElementById('loadPresetBtn');
+    const deletePresetBtn = document.getElementById('deletePresetBtn');
+
+    let lastAnalysis = null;
+
+    function setManualEnabled(enabled) {
+      [fieldOrientation, halfOffset, circleSide, circleBandPct, circleThreshold].forEach(el => {
+        el.disabled = !enabled;
+      });
+      manualCalibRow1.style.opacity = enabled ? '1' : '0.6';
+      manualCalibRow2.style.opacity = enabled ? '1' : '0.6';
+    }
+
+    autoCalibrate.addEventListener('change', () => {
+      setManualEnabled(!autoCalibrate.checked);
+    });
+    // Inicial: autocalibrar activado
+    setManualEnabled(false);
+
+    halfOffset.addEventListener('input', () => { halfOffsetVal.textContent = halfOffset.value; });
+    circleBandPct.addEventListener('input', () => { circleBandPctVal.textContent = circleBandPct.value; });
+    ocrZoom.addEventListener('input', () => { ocrZoomVal.textContent = ocrZoom.value; });
+    ocrSensitivity.addEventListener('input', () => { ocrSensitivityVal.textContent = ocrSensitivity.value; });
+
+    modeRadios.forEach(r => {
+      r.addEventListener('change', () => {
+        const mode = document.querySelector('input[name="mode"]:checked').value;
+        youtubeRow.style.display = mode === 'youtube' ? '' : 'none';
+        fileRow.style.display = mode === 'file' ? '' : 'none';
+      });
+    });
+
+    function formatThirds(thirds) {
+      const lines = [];
+      const order = ['tercio_superior', 'tercio_medio', 'tercio_inferior'];
+      for (const key of order) {
+        const t = thirds[key];
+        if (!t) continue;
+        lines.push(`   · ${key}: frames=${t.frames_with_presence}, seg=${t.presence_seconds}, area_prom=${t.avg_area_fraction}`);
+      }
+      return lines.join('\n');
+    }
+
+    function formatHalves(halves) {
+      const lines = [];
+      const order = ['mitad_superior','mitad_inferior','mitad_izquierda','mitad_derecha'];
+      for (const key of order) {
+        const h = halves[key];
+        if (!h) continue;
+        lines.push(`   · ${key}: frames=${h.frames_with_presence}, seg=${h.presence_seconds}, area_prom=${h.avg_area_fraction}, dominados=${h.frames_dominated}, share_prom_frame=${h.avg_relative_share_per_frame}`);
+      }
+      return lines.join('\n');
+    }
+
+    function formatCircle(circle) {
+      if (!circle) return '   · (sin círculo configurado)';
+      return `   · entradas=${circle.entries}, seg_en_círculo=${circle.dwell_seconds}, area_prom=${circle.avg_area_fraction}`;
+    }
+
+    function downloadBlob(filename, content, mime) {
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function exportJSON() {
+      if (!lastAnalysis) return;
+      const stamped = {
+        exported_at: new Date().toISOString(),
+        params: collectFormValues(),
+        data: lastAnalysis,
+      };
+      downloadBlob('hockey_analysis.json', JSON.stringify(stamped, null, 2), 'application/json');
+    }
+
+    function escapeCsv(val) {
+      const s = String(val ?? '');
+      if (s.includes(',') || s.includes('\n') || s.includes('"')) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }
+
+    function buildCSVString(analysis) {
+      const { teams, metadata, player_metrics } = analysis;
+      const lines = [];
+      lines.push('Seccion,Campo,Valor');
+      const metaKeys = ['fps','sampled_frames','frame_stride'];
+      metaKeys.forEach(k => lines.push(['metadata', k, metadata[k]].map(escapeCsv).join(',')));
+      lines.push('');
+      lines.push('Equipo,frames_con_presencia,segundos,area_prom,frames_dominados,share_total,share_prom_frame');
+      Object.entries(teams || {}).forEach(([team, m]) => {
+        lines.push([
+          team,
+          m.frames_with_presence,
+          m.presence_seconds,
+          m.avg_area_fraction,
+          m.frames_dominated,
+          m.relative_share_overall,
+          m.avg_relative_share_per_frame,
+        ].map(escapeCsv).join(','));
+      });
+      lines.push('');
+      lines.push('Equipo,Mitad,frames_con_presencia,segundos,area_prom,frames_dominados,share_prom_frame');
+      Object.entries(teams || {}).forEach(([team, m]) => {
+        const halves = m.halves || {};
+        Object.entries(halves).forEach(([half, h]) => {
+          lines.push([
+            team, half, h.frames_with_presence, h.presence_seconds, h.avg_area_fraction, h.frames_dominated, h.avg_relative_share_per_frame
+          ].map(escapeCsv).join(','));
+        });
+      });
+      lines.push('');
+      lines.push('Equipo,Tercio,frames_con_presencia,segundos,area_prom');
+      Object.entries(teams || {}).forEach(([team, m]) => {
+        const thirds = m.thirds || {};
+        Object.entries(thirds).forEach(([third, t]) => {
+          lines.push([
+            team, third, t.frames_with_presence, t.presence_seconds, t.avg_area_fraction
+          ].map(escapeCsv).join(','));
+        });
+      });
+      lines.push('');
+      lines.push('Equipo,entradas,frames_en_circulo,seg_en_circulo,area_prom');
+      Object.entries(teams || {}).forEach(([team, m]) => {
+        const c = m.circle || null;
+        if (!c) return;
+        lines.push([
+          team, c.entries, c.frames_in_circle, c.dwell_seconds, c.avg_area_fraction
+        ].map(escapeCsv).join(','));
+      });
+      if (player_metrics) {
+        lines.push('');
+        lines.push('Jugador_equipo,Jugador_dorsal,frames_detectados,frames_ocr,dwell_seconds,avg_bbox_area,entries_circle,frames_in_circle,recognized,confidence,notes');
+        lines.push([
+          player_metrics.team,
+          player_metrics.number,
+          player_metrics.frames_detected,
+          player_metrics.frames_ocr_attempted,
+          player_metrics.dwell_seconds,
+          player_metrics.avg_bbox_area_fraction,
+          player_metrics.entries_circle,
+          player_metrics.frames_in_circle,
+          player_metrics.recognized_number_observed,
+          player_metrics.confidence,
+          player_metrics.notes,
+        ].map(escapeCsv).join(','));
+      }
+      return lines.join('\n');
+    }
+
+    function exportCSV() {
+      if (!lastAnalysis) return;
+      const csv = buildCSVString(lastAnalysis);
+      downloadBlob('hockey_analysis.csv', csv, 'text/csv');
+    }
+
+    async function exportZIP() {
+      if (!lastAnalysis || !window.JSZip) return;
+      const stamped = {
+        exported_at: new Date().toISOString(),
+        params: collectFormValues(),
+        data: lastAnalysis,
+      };
+      const jsonContent = JSON.stringify(stamped, null, 2);
+      const csvContent = buildCSVString(lastAnalysis);
+      const zip = new JSZip();
+      zip.file('hockey_analysis.json', jsonContent);
+      zip.file('hockey_analysis.csv', csvContent);
+      const blob = await zip.generateAsync({ type: 'blob' });
+      downloadBlob('hockey_bundle.zip', blob, 'application/zip');
+    }
+
+    function collectFormValues() {
+      const mode = document.querySelector('input[name="mode"]:checked').value;
+      return {
+        mode,
+        youtubeUrl: document.getElementById('youtubeUrl').value.trim(),
+        teamAName: document.getElementById('teamAName').value.trim(),
+        teamBName: document.getElementById('teamBName').value.trim(),
+        teamAColor: document.getElementById('teamAColor').value,
+        teamBColor: document.getElementById('teamBColor').value,
+        autoCalibrate: autoCalibrate.checked,
+        fieldOrientation: fieldOrientation.value,
+        halfOffset: halfOffset.value,
+        circleSide: circleSide.value,
+        circleBandPct: circleBandPct.value,
+        circleThreshold: circleThreshold.value,
+        ocrZoom: ocrZoom.value,
+        ocrSensitivity: ocrSensitivity.value,
+        selectedTeam: document.getElementById('selectedTeam').value,
+        selectedNumber: document.getElementById('selectedNumber').value,
+      };
+    }
+
+    function applyFormValues(p) {
+      if (!p) return;
+      if (typeof p.youtubeUrl === 'string') document.getElementById('youtubeUrl').value = p.youtubeUrl;
+      if (typeof p.teamAName === 'string') document.getElementById('teamAName').value = p.teamAName;
+      if (typeof p.teamBName === 'string') document.getElementById('teamBName').value = p.teamBName;
+      if (typeof p.teamAColor === 'string') document.getElementById('teamAColor').value = p.teamAColor;
+      if (typeof p.teamBColor === 'string') document.getElementById('teamBColor').value = p.teamBColor;
+      if (typeof p.autoCalibrate !== 'undefined') autoCalibrate.checked = !!p.autoCalibrate;
+      if (typeof p.fieldOrientation === 'string') fieldOrientation.value = p.fieldOrientation;
+      if (typeof p.halfOffset !== 'undefined') { halfOffset.value = p.halfOffset; halfOffsetVal.textContent = p.halfOffset; }
+      if (typeof p.circleSide === 'string') circleSide.value = p.circleSide;
+      if (typeof p.circleBandPct !== 'undefined') { circleBandPct.value = p.circleBandPct; circleBandPctVal.textContent = p.circleBandPct; }
+      if (typeof p.circleThreshold !== 'undefined') circleThreshold.value = p.circleThreshold;
+      if (typeof p.ocrZoom !== 'undefined') { ocrZoom.value = p.ocrZoom; ocrZoomVal.textContent = p.ocrZoom; }
+      if (typeof p.ocrSensitivity !== 'undefined') { ocrSensitivity.value = p.ocrSensitivity; ocrSensitivityVal.textContent = p.ocrSensitivity; }
+      if (typeof p.selectedTeam === 'string') document.getElementById('selectedTeam').value = p.selectedTeam;
+      if (typeof p.selectedNumber !== 'undefined') document.getElementById('selectedNumber').value = p.selectedNumber;
+      setManualEnabled(!autoCalibrate.checked);
+    }
+
+    function refreshPresetsSelect() {
+      const all = JSON.parse(localStorage.getItem('hockey_presets') || '{}');
+      presetSelect.innerHTML = '';
+      Object.keys(all).sort().forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name; opt.textContent = name;
+        presetSelect.appendChild(opt);
+      });
+    }
+
+    function savePreset() {
+      const name = (presetNameInput.value || '').trim();
+      if (!name) { alert('Ingresá un nombre de preset'); return; }
+      const all = JSON.parse(localStorage.getItem('hockey_presets') || '{}');
+      all[name] = collectFormValues();
+      localStorage.setItem('hockey_presets', JSON.stringify(all));
+      refreshPresetsSelect();
+    }
+
+    function loadPreset() {
+      const sel = presetSelect.value;
+      if (!sel) { alert('Seleccioná un preset'); return; }
+      const all = JSON.parse(localStorage.getItem('hockey_presets') || '{}');
+      const p = all[sel];
+      if (!p) { alert('Preset no encontrado'); return; }
+      applyFormValues(p);
+    }
+
+    function deletePreset() {
+      const sel = presetSelect.value;
+      if (!sel) { alert('Seleccioná un preset'); return; }
+      const all = JSON.parse(localStorage.getItem('hockey_presets') || '{}');
+      if (!all[sel]) { alert('Preset no encontrado'); return; }
+      delete all[sel];
+      localStorage.setItem('hockey_presets', JSON.stringify(all));
+      refreshPresetsSelect();
+    }
+
+    exportJsonBtn.addEventListener('click', exportJSON);
+    exportCsvBtn.addEventListener('click', exportCSV);
+    exportZipBtn.addEventListener('click', exportZIP);
+    savePresetBtn.addEventListener('click', savePreset);
+    loadPresetBtn.addEventListener('click', loadPreset);
+    deletePresetBtn.addEventListener('click', deletePreset);
+
+    function enableExports(enable) {
+      exportJsonBtn.disabled = !enable;
+      exportCsvBtn.disabled = !enable;
+      exportZipBtn.disabled = !enable || !window.JSZip;
+    }
+
+    function analyzeToFormData() {
+      const formData = new FormData();
+      const mode = document.querySelector('input[name="mode"]:checked').value;
+      if (mode === 'youtube') {
+        const url = document.getElementById('youtubeUrl').value.trim();
+        if (!url) { throw new Error('Ingresá una URL de YouTube.'); }
+        formData.append('youtube_url', url);
+      } else {
+        const file = document.getElementById('videoFile').files[0];
+        if (!file) { throw new Error('Seleccioná un archivo de video.'); }
+        formData.append('video_file', file);
+      }
+      const teamAName = document.getElementById('teamAName').value.trim() || 'Equipo A';
+      const teamBName = document.getElementById('teamBName').value.trim() || 'Equipo B';
+      const teamAColor = document.getElementById('teamAColor').value;
+      const teamBColor = document.getElementById('teamBColor').value;
+      const teamMap = {}; teamMap[teamAName] = teamAColor; teamMap[teamBName] = teamBColor;
+      formData.append('team_color_map', JSON.stringify(teamMap));
+      const selectedTeam = document.getElementById('selectedTeam').value;
+      const selectedNumber = document.getElementById('selectedNumber').value;
+      if (selectedTeam) formData.append('selected_team', selectedTeam);
+      if (selectedNumber) formData.append('selected_number', selectedNumber);
+      // Auto calibración
+      formData.append('auto_calibrate', String(autoCalibrate.checked));
+      // Sólo se usan si autocalibrar está apagado
+      formData.append('field_orientation', fieldOrientation.value);
+      formData.append('half_offset_pct', String(halfOffset.value));
+      if (circleSide.value) formData.append('circle_side', circleSide.value);
+      formData.append('circle_band_pct', String(circleBandPct.value));
+      formData.append('circle_threshold_fraction', String(circleThreshold.value));
+      formData.append('ocr_zoom', String(ocrZoom.value));
+      formData.append('ocr_sensitivity', String(ocrSensitivity.value));
+      return formData;
+    }
+
+    async function analyze() {
+      enableExports(false);
+      lastAnalysis = null;
+      resultEl.textContent = 'Analizando...';
+      let formData;
+      try {
+        formData = analyzeToFormData();
+      } catch (e) {
+        resultEl.textContent = e.message;
+        return;
+      }
+      try {
+        const res = await fetch('/api/analyze', { method: 'POST', body: formData });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          resultEl.textContent = 'Error: ' + (err.detail || res.statusText);
+          return;
+        }
+        const data = await res.json();
+        lastAnalysis = data;
+        enableExports(true);
+        const lines = [];
+        lines.push('Metadata:');
+        const meta = {
+          fps: data.metadata.fps,
+          sampled_frames: data.metadata.sampled_frames,
+          frame_stride: data.metadata.frame_stride,
+          video_size: data.metadata.video_size,
+          field_orientation: data.metadata.field_orientation,
+          half_line: data.metadata.half_line,
+          halves_bounds: data.metadata.halves_bounds,
+          thirds_bounds: data.metadata.thirds_bounds,
+          circle_band: data.metadata.circle_band,
+          auto_calibrated: data.metadata.auto_calibrated,
+          auto_guess: data.metadata.auto_guess,
+          frames_considered_for_share: data.metadata.frames_considered_for_share,
+          frames_tie: data.metadata.frames_tie,
+        };
+        lines.push(JSON.stringify(meta, null, 2));
+        lines.push('\nMétricas por equipo:');
+        for (const [team, m] of Object.entries(data.teams || {})) {
+          lines.push(`- ${team}:`);
+          lines.push(`   frames_con_presencia=${m.frames_with_presence}, seg=${m.presence_seconds}, area_prom=${m.avg_area_fraction}`);
+          lines.push(`   frames_dominados=${m.frames_dominated}, share_total=${m.relative_share_overall}, share_promedio_frame=${m.avg_relative_share_per_frame}`);
+          lines.push(`   tercios:\n${formatThirds(m.thirds || {})}`);
+          lines.push(`   mitades:\n${formatHalves(m.halves || {})}`);
+          lines.push(`   círculo:\n${formatCircle(m.circle || null)}`);
+        }
+        if (data.player_metrics) {
+          lines.push('\nMétricas por dorsal (MVP):');
+          lines.push(JSON.stringify(data.player_metrics, null, 2));
+        }
+        resultEl.textContent = lines.join('\n');
+      } catch (e) {
+        resultEl.textContent = 'Error de red: ' + e.message;
+      }
+    }
+
+    document.getElementById('analyzeBtn').addEventListener('click', analyze);
+
+    // Inicializar presets en carga
+    refreshPresetsSelect();
+  </script>
+</body>
+</html>
