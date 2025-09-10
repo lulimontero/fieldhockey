@@ -31,6 +31,17 @@
 
     <div class="row">
       <div class="col">
+        <label>Backend API (opcional, si el backend está en otro dominio)</label>
+        <input id="apiBase" type="text" placeholder="https://tu-backend.onrender.com" />
+        <small class="hint">Se guarda localmente. Déjalo vacío para usar el mismo dominio.</small>
+      </div>
+      <div class="col" style="align-self: end;">
+        <button id="saveApiBaseBtn" class="secondary">Guardar backend</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col">
         <label>Método de entrada</label>
         <label><input type="radio" name="mode" value="youtube" checked /> Enlace de YouTube</label>
         <label><input type="radio" name="mode" value="file" /> Archivo local</label>
@@ -202,6 +213,9 @@
     const fileRow = document.getElementById('fileRow');
     const resultEl = document.getElementById('result');
 
+    const apiBaseInput = document.getElementById('apiBase');
+    const saveApiBaseBtn = document.getElementById('saveApiBaseBtn');
+
     const autoCalibrate = document.getElementById('autoCalibrate');
     const manualCalibRow1 = document.getElementById('manualCalibRow1');
     const manualCalibRow2 = document.getElementById('manualCalibRow2');
@@ -230,6 +244,14 @@
     const deletePresetBtn = document.getElementById('deletePresetBtn');
 
     let lastAnalysis = null;
+
+    // Cargar api base guardada
+    apiBaseInput.value = localStorage.getItem('hockey_api_base') || '';
+    saveApiBaseBtn.addEventListener('click', () => {
+      const v = (apiBaseInput.value || '').trim().replace(/\/$/, '');
+      localStorage.setItem('hockey_api_base', v);
+      alert('Backend guardado.');
+    });
 
     function setManualEnabled(enabled) {
       [fieldOrientation, halfOffset, circleSide, circleBandPct, circleThreshold].forEach(el => {
@@ -409,6 +431,7 @@
       const mode = document.querySelector('input[name="mode"]:checked').value;
       return {
         mode,
+        apiBase: apiBaseInput.value.trim(),
         youtubeUrl: document.getElementById('youtubeUrl').value.trim(),
         teamAName: document.getElementById('teamAName').value.trim(),
         teamBName: document.getElementById('teamBName').value.trim(),
@@ -429,6 +452,7 @@
 
     function applyFormValues(p) {
       if (!p) return;
+      if (typeof p.apiBase === 'string') { apiBaseInput.value = p.apiBase; }
       if (typeof p.youtubeUrl === 'string') document.getElementById('youtubeUrl').value = p.youtubeUrl;
       if (typeof p.teamAName === 'string') document.getElementById('teamAName').value = p.teamAName;
       if (typeof p.teamBName === 'string') document.getElementById('teamBName').value = p.teamBName;
@@ -522,7 +546,7 @@
       if (selectedNumber) formData.append('selected_number', selectedNumber);
       // Auto calibración
       formData.append('auto_calibrate', String(autoCalibrate.checked));
-      // Sólo se usan si autocalibrar está apagado
+      // Manuales (se envían igual, el backend usará auto si auto_calibrate=true)
       formData.append('field_orientation', fieldOrientation.value);
       formData.append('half_offset_pct', String(halfOffset.value));
       if (circleSide.value) formData.append('circle_side', circleSide.value);
@@ -544,8 +568,10 @@
         resultEl.textContent = e.message;
         return;
       }
+      const apiBase = (localStorage.getItem('hockey_api_base') || '').trim().replace(/\/$/, '');
+      const endpoint = (apiBase ? apiBase : '') + '/api/analyze';
       try {
-        const res = await fetch('/api/analyze', { method: 'POST', body: formData });
+        const res = await fetch(endpoint, { method: 'POST', body: formData });
         if (!res.ok) {
           const err = await res.json().catch(() => ({ detail: res.statusText }));
           resultEl.textContent = 'Error: ' + (err.detail || res.statusText);
@@ -587,7 +613,7 @@
         }
         resultEl.textContent = lines.join('\n');
       } catch (e) {
-        resultEl.textContent = 'Error de red: ' + e.message;
+        resultEl.textContent = 'Error de red: ' + e.message + '\nEndpoint: ' + endpoint;
       }
     }
 
