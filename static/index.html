@@ -47,6 +47,11 @@
         <label>URL de YouTube</label>
         <input id="youtubeUrl" type="text" placeholder="https://www.youtube.com/watch?v=..." />
       </div>
+      <div class="col">
+        <label>Cookies de YouTube (cookies.txt, opcional)</label>
+        <input id="ytCookies" type="file" accept=".txt" />
+        <small class="hint">Usá un cookies.txt exportado de tu navegador para links que piden login.</small>
+      </div>
     </div>
 
     <div class="row" id="fileRow" style="display: none;">
@@ -516,6 +521,8 @@
         const url = document.getElementById('youtubeUrl').value.trim();
         if (!url) { throw new Error('Ingresá una URL de YouTube.'); }
         formData.append('youtube_url', url);
+        const cookies = document.getElementById('ytCookies').files[0];
+        if (cookies) formData.append('cookies_file', cookies);
       } else {
         const file = document.getElementById('videoFile').files[0];
         if (!file) { throw new Error('Seleccioná un archivo de video.'); }
@@ -561,8 +568,15 @@
       try {
         const res = await fetch(endpoint, { method: 'POST', body: formData });
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ detail: res.statusText }));
-          resultStatus.textContent = 'Error: ' + (err.detail || res.statusText);
+          const raw = await res.text().catch(() => '');
+          let detail = '';
+          try {
+            const parsed = JSON.parse(raw);
+            detail = parsed.detail || parsed.message || raw;
+          } catch (_) {
+            detail = raw || '';
+          }
+          resultStatus.textContent = `Error (${res.status} ${res.statusText}): ${detail || 'sin detalle'}`;
           return;
         }
         const data = await res.json();
