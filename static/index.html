@@ -21,6 +21,11 @@
     .result { white-space: pre-wrap; background: #f7f7f7; padding: 12px; border-radius: 8px; border: 1px solid #eee; }
     .hr { height: 1px; background: #eee; margin: 16px 0; }
     small.hint { color: #666; }
+    .hidden { display: none; }
+    .panel { margin-top: 16px; }
+    table.tbl { width: 100%; border-collapse: collapse; margin: 8px 0; }
+    table.tbl th, table.tbl td { border: 1px solid #e5e5e5; padding: 6px 8px; text-align: left; font-size: 14px; }
+    table.tbl th { background: #f2f4f7; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 </head>
@@ -28,17 +33,6 @@
   <div class="card">
     <h2>Hockey Analyzer MVP</h2>
     <p>Cargá un video (YouTube o archivo) y mapeá los colores de camisetas a cada equipo.</p>
-
-    <div class="row">
-      <div class="col">
-        <label>Backend API (opcional, si el backend está en otro dominio)</label>
-        <input id="apiBase" type="text" placeholder="https://tu-backend.onrender.com" />
-        <small class="hint">Se guarda localmente. Déjalo vacío para usar el mismo dominio.</small>
-      </div>
-      <div class="col" style="align-self: end;">
-        <button id="saveApiBaseBtn" class="secondary">Guardar backend</button>
-      </div>
-    </div>
 
     <div class="row">
       <div class="col">
@@ -204,17 +198,20 @@
     <div class="hr"></div>
 
     <h3>Resultado</h3>
-    <div id="result" class="result">Esperando análisis...</div>
+    <div id="result" class="panel">
+      <div id="resultStatus" class="result">Esperando análisis...</div>
+      <div id="resultMeta" class="hidden"></div>
+      <div id="resultTeams" class="hidden"></div>
+    </div>
   </div>
 
   <script>
     const modeRadios = document.querySelectorAll('input[name="mode"]');
     const youtubeRow = document.getElementById('youtubeRow');
     const fileRow = document.getElementById('fileRow');
-    const resultEl = document.getElementById('result');
-
-    const apiBaseInput = document.getElementById('apiBase');
-    const saveApiBaseBtn = document.getElementById('saveApiBaseBtn');
+    const resultStatus = document.getElementById('resultStatus');
+    const resultMeta = document.getElementById('resultMeta');
+    const resultTeams = document.getElementById('resultTeams');
 
     const autoCalibrate = document.getElementById('autoCalibrate');
     const manualCalibRow1 = document.getElementById('manualCalibRow1');
@@ -244,14 +241,6 @@
     const deletePresetBtn = document.getElementById('deletePresetBtn');
 
     let lastAnalysis = null;
-
-    // Cargar api base guardada
-    apiBaseInput.value = localStorage.getItem('hockey_api_base') || '';
-    saveApiBaseBtn.addEventListener('click', () => {
-      const v = (apiBaseInput.value || '').trim().replace(/\/$/, '');
-      localStorage.setItem('hockey_api_base', v);
-      alert('Backend guardado.');
-    });
 
     function setManualEnabled(enabled) {
       [fieldOrientation, halfOffset, circleSide, circleBandPct, circleThreshold].forEach(el => {
@@ -431,7 +420,6 @@
       const mode = document.querySelector('input[name="mode"]:checked').value;
       return {
         mode,
-        apiBase: apiBaseInput.value.trim(),
         youtubeUrl: document.getElementById('youtubeUrl').value.trim(),
         teamAName: document.getElementById('teamAName').value.trim(),
         teamBName: document.getElementById('teamBName').value.trim(),
@@ -452,7 +440,6 @@
 
     function applyFormValues(p) {
       if (!p) return;
-      if (typeof p.apiBase === 'string') { apiBaseInput.value = p.apiBase; }
       if (typeof p.youtubeUrl === 'string') document.getElementById('youtubeUrl').value = p.youtubeUrl;
       if (typeof p.teamAName === 'string') document.getElementById('teamAName').value = p.teamAName;
       if (typeof p.teamBName === 'string') document.getElementById('teamBName').value = p.teamBName;
@@ -560,28 +547,27 @@
     async function analyze() {
       enableExports(false);
       lastAnalysis = null;
-      resultEl.textContent = 'Analizando...';
+      resultStatus.textContent = 'Analizando...';
+      resultMeta.classList.add('hidden');
+      resultTeams.classList.add('hidden');
       let formData;
       try {
         formData = analyzeToFormData();
       } catch (e) {
-        resultEl.textContent = e.message;
+        resultStatus.textContent = e.message;
         return;
       }
-      const apiBase = (localStorage.getItem('hockey_api_base') || '').trim().replace(/\/$/, '');
-      const endpoint = (apiBase ? apiBase : '') + '/api/analyze';
+      const endpoint = '/api/analyze';
       try {
         const res = await fetch(endpoint, { method: 'POST', body: formData });
         if (!res.ok) {
           const err = await res.json().catch(() => ({ detail: res.statusText }));
-          resultEl.textContent = 'Error: ' + (err.detail || res.statusText);
+          resultStatus.textContent = 'Error: ' + (err.detail || res.statusText);
           return;
         }
         const data = await res.json();
         lastAnalysis = data;
         enableExports(true);
-        const lines = [];
-        lines.push('Metadata:');
         const meta = {
           fps: data.metadata.fps,
           sampled_frames: data.metadata.sampled_frames,
@@ -597,23 +583,64 @@
           frames_considered_for_share: data.metadata.frames_considered_for_share,
           frames_tie: data.metadata.frames_tie,
         };
-        lines.push(JSON.stringify(meta, null, 2));
-        lines.push('\nMétricas por equipo:');
-        for (const [team, m] of Object.entries(data.teams || {})) {
-          lines.push(`- ${team}:`);
-          lines.push(`   frames_con_presencia=${m.frames_with_presence}, seg=${m.presence_seconds}, area_prom=${m.avg_area_fraction}`);
-          lines.push(`   frames_dominados=${m.frames_dominated}, share_total=${m.relative_share_overall}, share_promedio_frame=${m.avg_relative_share_per_frame}`);
-          lines.push(`   tercios:\n${formatThirds(m.thirds || {})}`);
-          lines.push(`   mitades:\n${formatHalves(m.halves || {})}`);
-          lines.push(`   círculo:\n${formatCircle(m.circle || null)}`);
+        // Render meta
+        resultMeta.innerHTML = `<pre class="result">${JSON.stringify(meta, null, 2)}</pre>`;
+        resultMeta.classList.remove('hidden');
+
+        // Render teams as tables
+        let html = '';
+        const teams = data.teams || {};
+        // Summary table
+        html += '<h4>Resumen por equipo</h4>';
+        html += '<table class="tbl"><thead><tr><th>Equipo</th><th>Frames presencia</th><th>Segundos</th><th>Área prom.</th><th>Frames dominados</th><th>Share total</th><th>Share prom. frame</th></tr></thead><tbody>';
+        for (const [team, m] of Object.entries(teams)) {
+          html += `<tr><td>${team}</td><td>${m.frames_with_presence}</td><td>${m.presence_seconds}</td><td>${m.avg_area_fraction}</td><td>${m.frames_dominated}</td><td>${m.relative_share_overall}</td><td>${m.avg_relative_share_per_frame}</td></tr>`;
         }
+        html += '</tbody></table>';
+
+        // Halves table
+        html += '<h4>Mitades</h4>';
+        html += '<table class="tbl"><thead><tr><th>Equipo</th><th>Mitad</th><th>Frames</th><th>Segundos</th><th>Área prom.</th><th>Dominados</th><th>Share prom. frame</th></tr></thead><tbody>';
+        for (const [team, m] of Object.entries(teams)) {
+          const halves = m.halves || {};
+          for (const [half, h] of Object.entries(halves)) {
+            html += `<tr><td>${team}</td><td>${half}</td><td>${h.frames_with_presence}</td><td>${h.presence_seconds}</td><td>${h.avg_area_fraction}</td><td>${h.frames_dominated}</td><td>${h.avg_relative_share_per_frame}</td></tr>`;
+          }
+        }
+        html += '</tbody></table>';
+
+        // Thirds table
+        html += '<h4>Tercios</h4>';
+        html += '<table class="tbl"><thead><tr><th>Equipo</th><th>Tercio</th><th>Frames</th><th>Segundos</th><th>Área prom.</th></tr></thead><tbody>';
+        for (const [team, m] of Object.entries(teams)) {
+          const thirds = m.thirds || {};
+          for (const [third, t] of Object.entries(thirds)) {
+            html += `<tr><td>${team}</td><td>${third}</td><td>${t.frames_with_presence}</td><td>${t.presence_seconds}</td><td>${t.avg_area_fraction}</td></tr>`;
+          }
+        }
+        html += '</tbody></table>';
+
+        // Circle table (if any)
+        html += '<h4>Círculo</h4>';
+        html += '<table class="tbl"><thead><tr><th>Equipo</th><th>Entradas</th><th>Frames en círculo</th><th>Segundos</th><th>Área prom.</th></tr></thead><tbody>';
+        for (const [team, m] of Object.entries(teams)) {
+          const c = m.circle || null;
+          if (!c) continue;
+          html += `<tr><td>${team}</td><td>${c.entries}</td><td>${c.frames_in_circle}</td><td>${c.dwell_seconds}</td><td>${c.avg_area_fraction}</td></tr>`;
+        }
+        html += '</tbody></table>';
+
+        // Player metrics
         if (data.player_metrics) {
-          lines.push('\nMétricas por dorsal (MVP):');
-          lines.push(JSON.stringify(data.player_metrics, null, 2));
+          html += '<h4>Métricas por dorsal (MVP)</h4>';
+          html += `<pre class="result">${JSON.stringify(data.player_metrics, null, 2)}</pre>`;
         }
-        resultEl.textContent = lines.join('\n');
+
+        resultTeams.innerHTML = html;
+        resultTeams.classList.remove('hidden');
+        resultStatus.textContent = 'Listo';
       } catch (e) {
-        resultEl.textContent = 'Error de red: ' + e.message + '\nEndpoint: ' + endpoint;
+        resultStatus.textContent = 'Error de red: ' + e.message + '\nEndpoint: ' + endpoint;
       }
     }
 
