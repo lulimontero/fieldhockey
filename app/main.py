@@ -32,6 +32,10 @@ async def index():
     index_path = os.path.join(static_dir, "index.html")
     return FileResponse(index_path)
 
+@app.get("/api/health")
+async def health():
+    return JSONResponse(content={"status": "ok"})
+
 
 def _download_youtube_temp(youtube_url: str) -> str:
     import yt_dlp  # lazy import
@@ -40,7 +44,7 @@ def _download_youtube_temp(youtube_url: str) -> str:
     output_template = os.path.join(temp_dir, "video.%(ext)s")
     ydl_opts = {
         "outtmpl": output_template,
-        "format": "mp4/bestvideo+bestaudio/best",
+        "format": "mp4[height<=360]/best[height<=360]/mp4/bestvideo+bestaudio/best",
         "quiet": True,
         "noprogress": True,
         "merge_output_format": "mp4",
@@ -107,13 +111,13 @@ async def analyze_endpoint(
             with open(temp_path, "wb") as f:
                 f.write(await video_file.read())
 
-        # Ejecutar análisis
+        # Ejecutar análisis (valores más rápidos por defecto)
         analysis = analyze_video_by_colors(
             video_path=temp_path,
             team_hex_by_name=team_hex_by_name,
-            frame_stride=10,           # muestrear 1 cada 10 frames (MVP)
-            max_frames=1500,           # recortar para MVP (~1 min @25fps)
-            area_threshold_fraction=0.001,  # umbral para considerar presencia
+            frame_stride=15,           # muestrear 1 cada 15 frames
+            max_frames=450,            # ~30s a 15 fps efectivos
+            area_threshold_fraction=0.001,
             field_orientation=field_orientation,
             half_offset_pct=half_offset_pct,
             circle_side=circle_side,
